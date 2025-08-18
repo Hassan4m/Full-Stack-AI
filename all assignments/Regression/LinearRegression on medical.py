@@ -8,8 +8,6 @@ df = pd.read_csv("E:\\codes\Full-Stack-AI\\csv files\\number-of-registered-medic
 for col in df.columns:
     df[col] = df[col].astype(str).str.replace(",", "").astype(int)
 
-
-
 print("\nDataFrame Info:")
 print(df.info())
 
@@ -21,8 +19,6 @@ print(df.describe())
 
 print("\nShape:")
 print(df.shape)
-
-
 
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
@@ -41,7 +37,6 @@ print(f"\nIntercept: {intercept}")
 slope = model.coef_[0][0]
 print(f"Slope: {slope}")
 
-
 def predict_female_dentists(female_doctors):
     return slope * female_doctors + intercept
 
@@ -51,16 +46,11 @@ for val in test_values:
     predicted = predict_female_dentists(val)
     print(f"Predicted Female Dentists for {val} Female Doctors: {predicted:.2f}")
 
-
-
 y_pred = model.predict(X_test)
 
 # Print predicted vs actual
 for actual, predicted in zip(y_test.flatten(), y_pred.flatten()):
     print(f"Actual: {actual}, Predicted: {predicted:.2f}")
-
-
-
 
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
