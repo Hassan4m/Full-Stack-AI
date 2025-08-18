@@ -1,85 +1,157 @@
 # Multi Linear Regression Final Model
+import numpy as np
 import pandas as pd
-import numpy as np  
 import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, mean_squared_error
-import tensorflow as tf 
-from tensorflow import keras
-# from tensorflow.keras import sequential
-# from tensorflow.keras.layers import Dense, LSTM, Dropout
-from keras.metrics import Precision ,Recall
-#dataset
-df = pd.read_csv('E:\codes\Full-Stack-AI\csv files\AirPassengers.csv')
-print(df.head())
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+from keras.metrics import Precision, Recall
+from tensorflow.keras.callbacks import EarlyStopping
 
-# Design Model with related layers,
-#  Performing core operation of Tensflow-Keras based deep learning, Perform Model metric analysis
+#Load and explore the dataset
+df = pd.read_csv("E:\codes\Full-Stack-AI\csv files\AirPassengers.csv")
+print(df)
+print(df.head())    
+print(df.info())
+print(df.info())
+print(df.describe())
+
+# Data Cleaning
+
+# Remove duplicates
+df = df.drop_duplicates()
+
+# Remove missing/null values
+df = df.dropna(subset=['Month', 'Passengers'])
+
+# Remove outliers (optional, for creative analysis)
+Q1 = df['Passengers'].quantile(0.25)
+Q3 = df['Passengers'].quantile(0.75)
+IQR = Q3 - Q1
+df = df[(df['Passengers'] >= Q1 - 1.5 * IQR) & (df['Passengers'] <= Q3 + 1.5 * IQR)]
+
+print("Cleaned Data:")
+
+#parse date and set as index
 df['Month'] = pd.to_datetime(df['Month'])
 df.set_index('Month', inplace=True)
-df['Passengers'] = df['Passengers'].astype(float)
-# Splitting the dataset into training and testing sets
-train_size = int(len(df) * 0.8)
-train, test = df[:train_size], df[train_size:]
-# Reshape the data for LSTM
-X_train = train['Passengers'].values.reshape(-1, 1)
-X_test = test['Passengers'].values.reshape(-1, 1)
-# Normalize the data
-from sklearn.preprocessing import MinMaxScaler
-scaler = MinMaxScaler(feature_range=(0, 1))
-X_train_scaled = scaler.fit_transform(X_train)
-X_test_scaled = scaler.transform(X_test)
-# Reshape the data for LSTM input
-X_train_scaled = X_train_scaled.reshape((X_train_scaled.shape[0], 1, X_train_scaled.shape[1]))
-X_test_scaled = X_test_scaled.reshape((X_test_scaled.shape[0], 1, X_test_scaled.shape[1]))
-# Define the LSTM model
-model = keras.Sequential([
-    keras.layers.LSTM(50, activation='relu', input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2])),
-    keras.layers.Dropout(0.2),
-    keras.layers.Dense(1)
+
+# Visualize the time series
+plt.figure(figsize=(10,5))
+sns.lineplot(data=df, x=df.index, y='Passengers')
+plt.title('Monthly US Air Passengers (1949-1960)')
+plt.xlabel('Date')
+plt.ylabel('Passengers')
+plt.show()
+
+#Feature Engineering: Add Month and Year as features
+df['Month_num'] = df.index.month
+df['Year'] = df.index.year
+
+# Scaling
+scaler = MinMaxScaler()
+df['Passengers_scaled'] = scaler.fit_transform(df[['Passengers']])
+
+#Prepare Data for LSTM
+def create_sequences(data, seq_length):
+    X, y = [], []
+    for i in range(len(data) - seq_length):
+        X.append(data[i:i+seq_length])
+        y.append(data[i+seq_length])
+    return np.array(X), np.array(y)
+
+SEQ_LEN = 12  # Use past 12 months to predict next month
+data = df['Passengers_scaled'].values
+X, y = create_sequences(data, SEQ_LEN)
+
+# Reshape for LSTM [samples, time_steps, features]
+X = X.reshape((X.shape[0], X.shape[1], 1))
+
+#Train-Test Split
+split = int(0.8 * len(X))
+X_train, X_test = X[:split], X[split:]
+y_train, y_test = y[:split], y[split:]
+
+#Build LSTM Model
+model = Sequential([
+    LSTM(64,activation='tanh', input_shape=(SEQ_LEN, 1), return_sequences=True),
+    Dropout(0.2),
+    LSTM(32, activation='tanh'),
+    Dropout(0.2), 
+    Dense(1)
 ])
+
 # Compile the model
 model.compile(optimizer='adam', loss='mean_squared_error', metrics=[Precision(), Recall()])
-# Train the model
-history = model.fit(X_train_scaled, train['Passengers'].values, epochs=50, batch_size=32, validation_data=(X_test_scaled, test['Passengers'].values), verbose=1)
-# Evaluate the model
-loss, precision, recall = model.evaluate(X_test_scaled, test['Passengers'].values, verbose=0)
-print(f"Test Loss: {loss}, Precision: {precision}, Recall: {recall}")
-# Make predictions
-predictions = model.predict(X_test_scaled)
-# Inverse transform the predictions
-predictions = scaler.inverse_transform(predictions)
-# Plot the results
-plt.figure(figsize=(12, 6))
-plt.plot(df.index[:train_size], train['Passengers'], label='Train Data')
-plt.plot(df.index[train_size:], test['Passengers'], label='Test Data')
-plt.plot(df.index[train_size:], predictions, label='Predictions', color='red')
-plt.xlabel('Date')
-plt.ylabel('Number of Passengers')
-plt.title('Air Passengers Prediction using LSTM')
+
+#Train Model
+
+early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+history = model.fit(
+    X_train, y_train,
+    epochs=100,
+    batch_size=16,
+    validation_data=(X_test, y_test),
+    callbacks=[early_stop],
+    verbose=1
+)
+
+#Model Metric
+plt.figure(figsize=(8,4))
+plt.plot(history.history['loss'], label='Train Loss')
+plt.plot(history.history['val_loss'], label='Val Loss')
+plt.title('Model Loss During Training')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
 plt.legend()
 plt.show()
-# Save the model
-model.save('air_passengers_lstm_model.h5')
-# Load the model
-loaded_model = keras.models.load_model('air_passengers_lstm_model.h5')
-# Make predictions with the loaded model
-loaded_predictions = loaded_model.predict(X_test_scaled)
-# Inverse transform the loaded predictions
-loaded_predictions = scaler.inverse_transform(loaded_predictions)
-# Plot the results with the loaded model
-plt.figure(figsize=(12, 6))
-plt.plot(df.index[:train_size], train['Passengers'], label='Train Data')
-plt.plot(df.index[train_size:], test['Passengers'], label='Test Data')  
-plt.plot(df.index[train_size:], loaded_predictions, label='Loaded Model Predictions', color='green')
+
+# Predict and inverse scale
+y_pred = model.predict(X_test)
+y_test_inv = scaler.inverse_transform(y_test.reshape(-1,1))
+y_pred_inv = scaler.inverse_transform(y_pred)
+
+#Metrics
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+mae = mean_absolute_error(y_test_inv, y_pred_inv)
+mse = mean_squared_error(y_test_inv, y_pred_inv)
+rmse = np.sqrt(mse)
+r2 = r2_score(y_test_inv, y_pred_inv)
+
+print(f"Test MAE: {mae:.2f}")
+print(f"Test MSE: {mse:.2f}")
+print(f"Test RMSE: {rmse:.2f}")
+print(f"Test R2: {r2:.2f}")
+
+#Plot Actual vs Predicted
+plt.figure(figsize=(10,5))
+plt.plot(df.index[-len(y_test_inv):], y_test_inv, label='Actual')
+plt.plot(df.index[-len(y_test_inv):], y_pred_inv, label='Predicted')
+plt.title('Actual vs Predicted US Air Passengers')
 plt.xlabel('Date')
-plt.ylabel('Number of Passengers')
-plt.title('Air Passengers Prediction using Loaded LSTM Model')
+plt.ylabel('Passengers')
 plt.legend()
 plt.show()
-# Save the predictions to a CSV file
-predictions_df = pd.DataFrame({'Date': df.index[train_size:], 'Predicted_Passengers': predictions.flatten()})
-predictions_df.to_csv('air_passengers_predictions.csv', index=False)
-print("Predictions saved to 'air_passengers_predictions.csv'")
-# This code is a complete example of a deep learning model using LSTM to predict air passenger numbers.
+
+#Forecast Next 12 Months
+last_seq = data[-SEQ_LEN:]
+future_preds = []
+current_seq = last_seq.copy()
+for _ in range(12):
+    pred = model.predict(current_seq.reshape(1, SEQ_LEN, 1))[0,0]
+    future_preds.append(pred)
+    current_seq = np.append(current_seq[1:], pred)
+
+future_preds_inv = scaler.inverse_transform(np.array(future_preds).reshape(-1,1))
+future_dates = pd.date_range(df.index[-1] + pd.offsets.MonthBegin(), periods=12, freq='MS')
+
+plt.figure(figsize=(10,5))
+plt.plot(df.index, df['Passengers'], label='Historical')
+plt.plot(future_dates, future_preds_inv, label='Forecast', linestyle='--')
+plt.title('Forecasted US Air Passengers for Next 12 Months')
+plt.xlabel('Date')
+plt.ylabel('Passengers')
+plt.legend()
+plt.show()
